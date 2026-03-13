@@ -1,28 +1,29 @@
 # ==============================================================================
 # Inflammatory Predictors of Postpartum Anxiety
+# Clean analysis script aligned with manuscript
 #
 # Main manuscript outputs:
 #   Figure 1. Flowchart of study sample
 #   Table 1. Participant characteristics by GAD-7 score percentile group
-#   Figure 2. Forest plot
+#   Figure 2. Adjusted associations with postpartum GAD-7 scores
 #
 # Supplementary outputs:
-#   Supplemental Figure S1. Timing distribution across pregnancy
+#   Supplemental Figure S1. Cytokine sample timing across pregnancy
 #   Supplemental Figure S2. Collinearity among continuous covariates
 #   Supplemental Table S1. Full multivariable quantile regression results
 #   Supplemental Table S2. Complete-case quantile regression results
-#   Supplemental Table S3. Complete-case quantile regression results restricted
+#   Supplemental Table S3. Quantile regression results restricted
 #                         to participants completing the GAD-7 within 12 weeks postpartum
 #
 # Analytic sample in manuscript:
 #   n = 237
 #   complete-case sensitivity sample: n = 220
-#   <=12 week complete-case sensitivity sample: n = 187
+#   <=12 week sensitivity sample: n = 187
 # ==============================================================================
 
 rm(list = ls())
 graphics.off()
-setwd()
+setwd("/Users/rommea01/Dropbox/Carly/")
 
 # ==============================================================================
 # 0. PACKAGES
@@ -50,9 +51,9 @@ library(rsvg)
 # 1. LOAD DATA
 # ==============================================================================
 
-mental_health_raw <- read.csv("Mental health hx 2024-6-6_all variables.csv")
-data <- read.csv("GenC20-CarlyGADAndImmuneAct_DATA_2024-07-15_1505_FM.csv")
-logbook <- read.csv("Logbook 4.20.21_ML2 1.20.23 Frederieke_[55].xlsx - Sheet 1 - Logbook 4.20.21_ML2 1 (1).csv")
+mental_health_raw <- read.csv("/Users/rommea01/Dropbox/Carly/Mental health hx 2024-6-6_all variables.csv")
+data <- read.csv("/Users/rommea01/Dropbox/Carly/00 Updated Analysis/00 Feb 2026/Re_ Paper suggestions/GenC20-CarlyGADAndImmuneAct_DATA_2024-07-15_1505_FM.csv")
+logbook <- read.csv("/Users/rommea01/Dropbox/Carly/Merging Data with Logbook/Logbook 4.20.21_ML2 1.20.23 Frederieke_[55].xlsx - Sheet 1 - Logbook 4.20.21_ML2 1 (1).csv")
 
 # ==============================================================================
 # 2. VARIABLE LABELS
@@ -548,7 +549,7 @@ cat(
   "(SD", round(sd(lmmData.T3$GAD.score, na.rm = TRUE), 1), ").",
   "The median timing of GAD-7 completion was", round(gad_time_iqr[2], 1),
   "weeks postpartum (IQR,", round(gad_time_iqr[1], 1), "–", round(gad_time_iqr[3], 1), ").",
-  "The median maternal age at delivery was", round(age_iqr[2], 0),
+  "The median maternal age at enrollment was", round(age_iqr[2], 0),
   "years (IQR,", round(age_iqr[1], 0), "–", round(age_iqr[3], 0), ").",
   "Participants were predominantly White (", race_tab["White"], "%) and Hispanic (", race_tab["Hispanic"],
   "%), with smaller proportions identifying as Asian (", race_tab["Asian"],
@@ -556,15 +557,15 @@ cat(
   "\n"
 )
 
-# =========================================================================================================
-# 21. SUPPLEMENTAL FIGURE S1. Timing distributions for cytokine sampling and postpartum anxiety assessment.
-# =========================================================================================================
+# ==============================================================================
+# 21. SUPPLEMENTAL FIGURE S1. Timing distributions for cytokine sampling and postpartum anxiety assessment
+# ==============================================================================
+
 png("Supplemental_Figure_S1_Timing_Distributions.png",
     width = 2400, height = 800, res = 300)
 
 par(mfrow = c(1,3), mar = c(4,4,3,1))
 
-# Panel A — Cytokine sample timing
 hist(
   lmmData$gest_age_sample_wk,
   breaks = 20,
@@ -575,7 +576,6 @@ hist(
   xaxp = c(0,42,7)
 )
 
-# Panel B — Postpartum timing of GAD
 hist(
   lmmData.T3$GAD_wks_postpart,
   breaks = seq(-0.5, 24.5, by = 1),
@@ -588,7 +588,6 @@ hist(
 )
 axis(1, at = seq(0, 24, by = 4), labels = seq(0, 24, by = 4))
 
-# Panel C — Pandemic timing
 hist(
   as.numeric(lmmData.T3$days_since_pandemic),
   breaks = 20,
@@ -599,12 +598,6 @@ hist(
 
 dev.off()
 
-png("Supplemental_Figure_S1_Timing_Distributions.png",
-    width = 2400, height = 800, res = 300)
-
-par(mfrow = c(1,3), mar = c(4,4,3,1))
-
-### PDF version
 pdf("Supplemental_Figure_S1_Timing_Distributions.pdf",
     width = 12, height = 4)
 
@@ -631,6 +624,7 @@ hist(
   main = "B. GAD-7 completion timing"
 )
 axis(1, at = seq(0, 24, by = 4), labels = seq(0, 24, by = 4))
+
 hist(
   as.numeric(lmmData.T3$days_since_pandemic),
   breaks = 20,
@@ -751,7 +745,6 @@ pool_qr <- function(marker, tau_val, covariates, imp) {
   )
 }
 
-# Collect pooled primary results
 primary_qr_results <- bind_rows(
   lapply(c("il1b.log", "il6.log", "il17a.log", "crp.log"), function(marker) {
     bind_rows(lapply(taus, function(tau_val) {
@@ -763,11 +756,16 @@ primary_qr_results <- bind_rows(
   })
 )
 
-# FDR across primary exposure tests only, within marker across 3 quantiles
+# Apply BH FDR across the 12 primary exposure tests only
 primary_qr_results <- primary_qr_results %>%
-  group_by(marker) %>%
-  mutate(p_fdr = p.adjust(p, method = "BH")) %>%
-  ungroup()
+  mutate(p_fdr = NA_real_)
+
+exposure_idx <- primary_qr_results$term == primary_qr_results$marker
+
+primary_qr_results$p_fdr[exposure_idx] <- p.adjust(
+  primary_qr_results$p[exposure_idx],
+  method = "BH"
+)
 
 # ==============================================================================
 # 25. TABLE 1. PARTICIPANT CHARACTERISTICS BY GAD-7 SCORE PERCENTILE GROUP
@@ -845,8 +843,7 @@ table1_ft <- tab1_base %>%
 
 print(table1_ft)
 save_as_html(table1_ft, path = "Table_1_Participant_Characteristics_by_GAD7_Percentile_Group.html")
-save_as_docx("Table 1" = table1_ft,
-             path = "Table_1.docx")
+save_as_docx("Table 1" = table1_ft, path = "Table_1.docx")
 
 # ==============================================================================
 # 26. TABLE 2. PRIMARY ADJUSTED ASSOCIATIONS
@@ -908,7 +905,6 @@ table2_gt <- table2_wide %>%
   )
 
 print(table2_gt)
-#gtsave(table2_gt, "Table_2_Adjusted_Associations_Quantile_Regression.html")
 gtsave(table2_gt, "Table_2.docx")
 
 # ==============================================================================
@@ -977,9 +973,9 @@ flowchart
 # 28. FIGURE 2. ADJUSTED ASSOCIATIONS WITH POSTPARTUM GAD-7 SCORES
 #     Includes inflammatory markers + psychiatric history
 # ==============================================================================
-# ── 1. Collect pooled results ──────────────────────────────────────────────────
+
 forest_rows <- list()
-psych_rows_collected <- character(0)   # track which taus already have depranx
+psych_rows_collected <- character(0)
 
 for (marker in c("il6.log", "il17a.log", "il1b.log", "crp.log")) {
   for (tau_val in taus) {
@@ -990,7 +986,6 @@ for (marker in c("il6.log", "il17a.log", "il1b.log", "crp.log")) {
     )
     if (is.null(res)) next
     
-    # --- cytokine row ---
     cyto_row <- res %>%
       filter(term == marker) %>%
       mutate(marker = marker, tau = tau_val)
@@ -999,7 +994,6 @@ for (marker in c("il6.log", "il17a.log", "il1b.log", "crp.log")) {
       forest_rows[[length(forest_rows) + 1]] <- cyto_row
     }
     
-    # --- psychiatric history row (collect once per tau, not once per marker) ---
     key <- as.character(tau_val)
     if (!key %in% psych_rows_collected) {
       psych_row <- res %>%
@@ -1014,27 +1008,28 @@ for (marker in c("il6.log", "il17a.log", "il1b.log", "crp.log")) {
   }
 }
 
-# ── 2. Build & clean forest_df ────────────────────────────────────────────────
 forest_df <- bind_rows(forest_rows) %>%
-  distinct(marker, tau, .keep_all = TRUE)   # guard against any remaining dupes
+  distinct(marker, tau, .keep_all = TRUE)
 
 if (nrow(forest_df) == 0) {
   stop("forest_df is empty. Check that pool_qr() is running correctly.")
 }
 
+exposure_fdr <- primary_qr_results %>%
+  filter(term == marker) %>%
+  select(marker, tau, p_fdr)
+
 forest_df <- forest_df %>%
+  left_join(exposure_fdr, by = c("marker", "tau")) %>%
   mutate(
-    p_fdr      = p.adjust(p, method = "BH"),
-    significant = p_fdr < 0.05,
-    ci_lo      = estimate - 1.96 * se,
-    ci_hi      = estimate + 1.96 * se,
-    
+    significant = ifelse(!is.na(p_fdr), p_fdr < 0.05, FALSE),
+    ci_lo = estimate - 1.96 * se,
+    ci_hi = estimate + 1.96 * se,
     marker_label = factor(
       marker,
       levels = c("depranx", "crp.log", "il17a.log", "il6.log", "il1b.log"),
       labels = c("History of anxiety/depression", "CRP", "IL-17A", "IL-6", "IL-1\u03b2")
     ),
-    
     tau_label = factor(
       tau,
       levels = c(0.50, 0.75, 0.90),
@@ -1042,142 +1037,87 @@ forest_df <- forest_df %>%
     )
   )
 
-# ── 3. Palette & shapes ───────────────────────────────────────────────────────
-pal    <- c("50th percentile" = "#1b7837",
-            "75th percentile" = "#762a83",
-            "90th percentile" = "#e08214")
+pal <- c(
+  "50th percentile" = "#1b7837",
+  "75th percentile" = "#762a83",
+  "90th percentile" = "#e08214"
+)
 
-shapes <- c("50th percentile" = 16,   # filled circle
-            "75th percentile" = 17,   # filled triangle
-            "90th percentile" = 15)   # filled square
+shapes <- c(
+  "50th percentile" = 16,
+  "75th percentile" = 17,
+  "90th percentile" = 15
+)
 
-# ── 4. Plot ───────────────────────────────────────────────────────────────────
 pd <- position_dodge(width = 0.6)
 
 forest_plot <- ggplot(
   forest_df,
   aes(
-    x      = estimate,
-    y      = marker_label,
-    xmin   = ci_lo,
-    xmax   = ci_hi,
+    x = estimate,
+    y = marker_label,
+    xmin = ci_lo,
+    xmax = ci_hi,
     colour = tau_label,
-    shape  = tau_label,
-    group  = tau_label
+    shape = tau_label,
+    group = tau_label
   )
 ) +
-  
-  # Reference line at zero
   geom_vline(xintercept = 0, linetype = "dashed", colour = "grey50") +
-  
-  # Confidence intervals
   geom_errorbar(
-    width     = 0.18,
+    width = 0.18,
     linewidth = 0.7,
-    position  = pd
+    position = pd
   ) +
-  
-  # Points — significant results rendered larger
   geom_point(
     aes(size = significant),
     position = pd,
-    stroke   = 0          # no outline stroke needed with solid fills
+    stroke = 0
   ) +
-  
-  # Scales
   scale_colour_manual(name = "GAD-7 percentile", values = pal) +
-  scale_shape_manual( name = "GAD-7 percentile", values = shapes) +
-  
-  # Clear size contrast between significant and non-significant
+  scale_shape_manual(name = "GAD-7 percentile", values = shapes) +
   scale_size_manual(
     values = c("TRUE" = 4.5, "FALSE" = 2.5),
-    guide  = "none"
+    guide = "none"
   ) +
-  
-  # Labels
   labs(
-    x        = "Quantile regression coefficient (change in GAD-7 score)",
-    y        = NULL
+    x = "Quantile regression coefficient (change in GAD-7 score)",
+    y = NULL
   ) +
-  
-  # Theme
   theme_bw(base_size = 12) +
   theme(
-    legend.position      = "bottom",
-    legend.box           = "horizontal",
-    legend.title         = element_text(face = "bold", size = 11),
-    legend.key.size      = unit(0.5, "cm"),
-    panel.grid.minor     = element_blank(),
-    panel.grid.major.y   = element_blank(),   # remove horizontal gridlines for cleaner look
-    plot.title           = element_text(size = 12, face = "bold"),
-    plot.subtitle        = element_text(size = 10, colour = "grey40"),
-    axis.text.y          = element_text(size = 11),
-    axis.text.x          = element_text(size = 10),
-    plot.margin          = margin(8, 10, 8, 8)
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    legend.title = element_text(face = "bold", size = 11),
+    legend.key.size = unit(0.5, "cm"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.title = element_text(size = 12, face = "bold"),
+    plot.subtitle = element_text(size = 10, colour = "grey40"),
+    axis.text.y = element_text(size = 11),
+    axis.text.x = element_text(size = 10),
+    plot.margin = margin(8, 10, 8, 8)
   )
 
-
-# ── 5. Save to file ─────────────────────────────────────────────────
 ggsave(
   "Figure 2.forest_plot_gad7.pdf",
-  plot   = forest_plot,
-  width  = 7,
+  plot = forest_plot,
+  width = 7,
   height = 5,
-  device = cairo_pdf   # preserves Unicode (β symbol) and vector quality
+  device = cairo_pdf
 )
 
 ggsave(
   "Figure 2.forest_plot_gad7.png",
-  plot  = forest_plot,
+  plot = forest_plot,
   width = 7,
   height = 5,
-  dpi   = 300
+  dpi = 300
 )
+
 # ==============================================================================
 # 29. SUPPLEMENTAL TABLE S1. FULL MULTIVARIABLE QUANTILE REGRESSION RESULTS
 # ==============================================================================
-
-pool_qr_with_fdr <- function(marker, tau_val, covariates, imp) {
-  fits <- lapply(1:imp$m, function(i) {
-    d <- complete(imp, i)
-    rq(
-      as.formula(paste("GAD.score ~", marker, "+", covariates)),
-      tau = tau_val,
-      data = d,
-      model = TRUE
-    )
-  })
-  
-  coef_mat <- do.call(cbind, lapply(fits, function(f) {
-    cf <- coef(f)
-    matrix(cf, ncol = 1, dimnames = list(names(cf), NULL))
-  }))
-  
-  var_mat <- do.call(cbind, lapply(fits, function(f) {
-    s <- summary(f, se = "iid")$coefficients
-    matrix(s[, "Std. Error"]^2, ncol = 1, dimnames = list(rownames(s), NULL))
-  }))
-  
-  Q_bar <- rowMeans(coef_mat)
-  U_bar <- rowMeans(var_mat)
-  B <- apply(coef_mat, 1, var)
-  T_var <- U_bar + (1 + 1 / imp$m) * B
-  se <- sqrt(T_var)
-  z <- Q_bar / se
-  p <- 2 * pnorm(-abs(z))
-  p_fdr <- p.adjust(p, method = "BH")
-  
-  data.frame(
-    term = names(Q_bar),
-    estimate = Q_bar,
-    se = se,
-    z = z,
-    p = p,
-    p_fdr = p_fdr,
-    row.names = NULL
-  )
-}
-
 pretty_term_names <- c(
   "(Intercept)" = "Intercept",
   "il1b.log" = "IL-1β",
@@ -1217,6 +1157,7 @@ term_order <- c(
   "≤ Some college",
   "≥ Bachelor's degree",
   "No SARS-CoV-2 infection during pregnancy",
+  "SARS-CoV-2 infection during pregnancy",
   "Days postpartum at GAD-7",
   "Days since pandemic onset",
   "Pre-pregnancy BMI",
@@ -1239,26 +1180,39 @@ percentile_map <- c(
   "0.9" = "90th percentile"
 )
 
-all_results_s2 <- map_dfr(c("il1b.log", "il6.log", "il17a.log", "crp.log"), function(marker) {
+all_results_s1 <- map_dfr(c("il1b.log", "il6.log", "il17a.log", "crp.log"), function(marker) {
   map_dfr(c(0.5, 0.75, 0.9), function(tau_val) {
-    res <- pool_qr_with_fdr(marker, tau_val, covariates, imp)
-    
-    res %>%
+    pool_qr(marker, tau_val, covariates, imp) %>%
       mutate(
-        Marker = marker_map[[marker]],
-        Percentile = percentile_map[[as.character(tau_val)]],
-        Variable = dplyr::recode(term, !!!pretty_term_names),
-        ci_lo = estimate - 1.96 * se,
-        ci_hi = estimate + 1.96 * se,
-        `β (95% CI)` = sprintf("%.2f (%.2f, %.2f)", estimate, ci_lo, ci_hi),
-        `p-value` = ifelse(p < 0.001, "<0.001", sprintf("%.3f", p)),
-        `FDR-adjusted p-value` = ifelse(p_fdr < 0.001, "<0.001", sprintf("%.3f", p_fdr))
-      ) %>%
-      select(Marker, Percentile, Variable, `β (95% CI)`, `p-value`, `FDR-adjusted p-value`)
+        marker = marker,
+        tau = tau_val
+      )
   })
 })
 
-all_results_s2 <- all_results_s2 %>%
+all_results_s1 <- all_results_s1 %>%
+  left_join(
+    primary_qr_results %>%
+      filter(term == marker) %>%
+      select(marker, tau, term, p_fdr),
+    by = c("marker", "tau", "term")
+  ) %>%
+  mutate(
+    Marker = unname(marker_map[marker]),
+    Percentile = unname(percentile_map[as.character(tau)]),
+    Variable = dplyr::recode(term, !!!pretty_term_names),
+    ci_lo = estimate - 1.96 * se,
+    ci_hi = estimate + 1.96 * se,
+    `β (95% CI)` = sprintf("%.2f (%.2f, %.2f)", estimate, ci_lo, ci_hi),
+    `p-value` = ifelse(p < 0.001, "<0.001", sprintf("%.3f", p)),
+    `FDR-adjusted p-value` = case_when(
+      term == marker & is.na(p_fdr) ~ "",
+      term == marker & p_fdr < 0.001 ~ "<0.001",
+      term == marker ~ sprintf("%.3f", p_fdr),
+      TRUE ~ ""
+    )
+  ) %>%
+  filter(!is.na(Variable)) %>%
   filter(Variable %in% term_order) %>%
   mutate(
     Marker = factor(Marker, levels = marker_order),
@@ -1272,7 +1226,7 @@ all_results_s2 <- all_results_s2 %>%
   mutate(Percentile_display = if_else(row_number() == 1, as.character(Percentile), "")) %>%
   ungroup()
 
-supp_table_s2 <- all_results_s2 %>%
+supp_table_s1 <- all_results_s1 %>%
   select(
     Marker = Marker_display,
     Percentile = Percentile_display,
@@ -1285,13 +1239,22 @@ supp_table_s2 <- all_results_s2 %>%
   cols_label(
     Marker = "Marker",
     Percentile = "Percentile",
-    Variable = "Variable"
+    Variable = "Variable",
+    `β (95% CI)` = "β (95% CI)",
+    `p-value` = "p-value",
+    `FDR-adjusted p-value` = "FDR-adjusted p-value"
   ) %>%
   tab_header(
     title = "Supplemental Table S1. Full multivariable quantile regression results"
   ) %>%
-  cols_align(align = "left", columns = c(Marker, Percentile, Variable)) %>%
-  cols_align(align = "center", columns = c(`β (95% CI)`, `p-value`, `FDR-adjusted p-value`)) %>%
+  cols_align(
+    align = "left",
+    columns = c(Marker, Percentile, Variable)
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = c(`β (95% CI)`, `p-value`, `FDR-adjusted p-value`)
+  ) %>%
   tab_style(
     style = cell_text(weight = "bold"),
     locations = cells_body(columns = Marker, rows = Marker != "")
@@ -1308,18 +1271,26 @@ supp_table_s2 <- all_results_s2 %>%
     heading.border.bottom.width = px(1)
   )
 
-supp_table_s2
-#gtsave(supp_table_s2, "Supplemental_Table_S1_Full_Multivariable_Quantile_Regression_Results.html")
-gtsave(supp_table_s2, "Supplemental_Table_S1_Full_Multivariable_Quantile_Regression_Results.docx")
+supp_table_s1
 
+gtsave(
+  supp_table_s1,
+  "Supplemental_Table_S1_Full_Multivariable_Quantile_Regression_Results.docx"
+)
 
 write.csv(
-  all_results_s2 %>%
-    select(Marker, Percentile, Variable, `β (95% CI)`, `p-value`, `FDR-adjusted p-value`),
+  all_results_s1 %>%
+    select(
+      Marker,
+      Percentile,
+      Variable,
+      `β (95% CI)`,
+      `p-value`,
+      `FDR-adjusted p-value`
+    ),
   "Supplemental_Table_S1_Full_Multivariable_Quantile_Regression_Results.csv",
   row.names = FALSE
 )
-
 # ==============================================================================
 # 30. SENSITIVITY ANALYSIS 1. COMPLETE-CASE QUANTILE REGRESSION
 # ==============================================================================
@@ -1474,17 +1445,18 @@ make_journal_qr_table <- function(data_in, table_title = NULL) {
   gt_tbl
 }
 
-supp_table_s3 <- make_journal_qr_table(
+supp_table_s2 <- make_journal_qr_table(
   lmmData.T3.cc,
   table_title = "Supplemental Table S2. Complete-case quantile regression results"
 )
 
-supp_table_s3
-gtsave(supp_table_s3, "Supplemental_Table_S2_Complete_Case_Quantile_Regression_Results.docx")
+supp_table_s2
+gtsave(supp_table_s2, "Supplemental_Table_S2_Complete_Case_Quantile_Regression_Results.docx")
 
 # ==============================================================================
 # 31. SENSITIVITY ANALYSIS 2. <=12 WEEKS POSTPARTUM
 # ==============================================================================
+
 lmmData.T3.12wk <- lmmData.T3 %>%
   mutate(
     GAD_days_postpart   = as.numeric(GAD_days_postpart),
@@ -1500,7 +1472,6 @@ lmmData.T3.12wk <- lmmData.T3 %>%
 cat("\n--- Sensitivity analysis 2: <=12 weeks postpartum before imputation ---\n")
 cat("N <=12 weeks:", nrow(lmmData.T3.12wk), "\n")
 
-# Variables used in imputation/model
 imp_vars_12wk <- c(
   "GAD.score",
   "mom_educ.factor",
@@ -1524,7 +1495,6 @@ imp_data_12wk <- lmmData.T3.12wk %>%
 cat("N missing education in <=12 week sample:",
     sum(is.na(imp_data_12wk$mom_educ.factor)), "\n")
 
-# Multiple imputation
 set.seed(42)
 imp_12wk <- mice(
   imp_data_12wk,
@@ -1535,14 +1505,12 @@ imp_12wk <- mice(
 
 cat("Imputed sample size:", nrow(complete(imp_12wk, 1)), "\n")
 
-# Model covariates
 covariates <- paste(
   "maternalage + raceethnicitycombined.factor + para_binary + mom_educ.factor",
   "+ preg_pos.factor + GAD_days_postpart + days_since_pandemic",
   "+ prepregnancybmi + depranx"
 )
 
-# Pool quantile regression results across imputations
 pool_qr_12wk <- function(marker, tau_val, covariates, imp_obj) {
   fits <- lapply(1:imp_obj$m, function(i) {
     d <- complete(imp_obj, i)
@@ -1588,7 +1556,6 @@ pool_qr_12wk <- function(marker, tau_val, covariates, imp_obj) {
   )
 }
 
-# Build imputation-aware journal table with β (95% CI)
 make_journal_qr_table_imputed <- function(imp_obj, table_title = NULL) {
   
   percentiles <- c(
@@ -1723,7 +1690,6 @@ make_journal_qr_table_imputed <- function(imp_obj, table_title = NULL) {
   gt_tbl
 }
 
-# Create and save Supplementary Table S3
 supp_table_s3 <- make_journal_qr_table_imputed(
   imp_obj = imp_12wk,
   table_title = "Supplementary Table S3. Quantile regression results restricted to participants completing the GAD-7 within 12 weeks postpartum"
@@ -1735,7 +1701,9 @@ gtsave(
   supp_table_s3,
   "Supplementary_Table_S3_Imputed_Quantile_Regression_12_Weeks.docx"
 )
+
 # ==============================================================================
-# END 
+# END
 # ==============================================================================
+
 sessionInfo()
