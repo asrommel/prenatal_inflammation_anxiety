@@ -153,8 +153,6 @@ Edit lines 20-22 in `data_cleaning_and_analysis.R` to point to your data directo
 # Change to:
 data_dir <- "data/raw"
 mental_health_raw <- read.csv(file.path(data_dir, "Mental health hx 2024-6-6_all variables.csv"))
-# ... etc
-```
 
 ### Step 4: Run the Analysis
 
