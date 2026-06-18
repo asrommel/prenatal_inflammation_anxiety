@@ -113,7 +113,7 @@ Key variables in the analysis dataset:
 - `para`: Parity (number of prior pregnancies)
 - `prepregnancybmi`: Pre-pregnancy BMI (kg/m²)
 
-**Inflammatory markers** (collected at 6 timepoints):
+**Inflammatory markers** (collected at up to 6 timepoints):
 - `il6_1` through `il6_6`: IL-6 (pg/mL)
 - `il1b_1` through `il1b_6`: IL-1β (pg/mL)
 - `il17a_1` through `il17a_6`: IL-17A (pg/mL)
