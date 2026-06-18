@@ -36,7 +36,7 @@ This analysis examines associations between third-trimester inflammatory markers
 ## Software Requirements
 
 ### R Version
-- R ≥ 4.0.0 (tested with R 4.3.1)
+- R ≥ 4.0.0 (tested with R 4.5.1)
 
 ### Required Packages
 See Section 0 of `data_cleaning_and_analysis.R` for complete package list:
@@ -85,7 +85,7 @@ Data may be available from the corresponding author upon reasonable request, sub
 - Data Use Agreement (DUA) execution
 - Confirmation of authorized use
 
-**Requests should be directed to:** [corresponding author contact info]
+**Requests should be directed to: Anna-Sophie Rommel anna.rommel@mssm.edu
 
 ### Data Requirements
 
@@ -253,23 +253,19 @@ Supplementary_Table_S3_Imputed_Quantile_Regression_12_Weeks.docx
 
 If you use this code or reproduce these analyses, please cite:
 
-[Insert full manuscript citation once published]
+Kaplan C, Milazzo F, Suleri A, Gigase F, Lieb W, de Witte L, Bergink V, Rommel A-S. (2026). Inflammatory Predictors of Postpartum Anxiety: Findings from a Prospective NYC Pregnancy Cohort. *Journal of Affective Disorders*. https://doi.org/10.1016/j.jad.2026.122135
 
 ## Contact
 
-**Corresponding author:** [Name, email, institution]
+**Corresponding author:** Anna-Sophie Rommel, Department of Psychiatry, Icahn School of Medicine at Mount Sinai, anna.rommel@mssm.edu
 
-**Questions about the code:** [Repository maintainer contact info]
+**Questions about the code:** anna.rommel@mssm.edu
 
 ## License
-
-[Specify license: MIT, CC-BY-4.0, etc.]
+CC-BY-4.0
 
 ## Funding & Acknowledgments
-
-[Funding sources, IRB approval number, acknowledgments]
-
----
+This work was supported by the Simons Foundation (PI Rommel: 866027) and the National Institute of Child Health and Human Development (NICHD) (PI Rommel: R01HD109613). Additional support was provided through the computational and data resources and staff expertise of Scientific Computing and Data at the Icahn School of Medicine at Mount Sinai, made possible by the Clinical and Translational Science Award (CTSA) grant UL1TR004419 from the National Center for Advancing Translational Sciences. The findings and conclusions are those of the authors and do not necessarily represent the position of the funding agencies. We are deeply grateful to the Generation C participants who generously contributed their time and effort to this research.
 
 ## Troubleshooting
 
@@ -293,9 +289,9 @@ If you use this code or reproduce these analyses, please cite:
 ## Version History
 
 - **2024-07:** Initial release (analysis completed July 2024)
-- **Date:** Analysis completed [specific date]
-- **Last updated:** [date]
+- **Date:** Analysis completed May 2026
+- **Last updated:** June 2026
 
 ---
 
-**Last updated:** [Current date]
+**Last updated:** June 18th, 2026
