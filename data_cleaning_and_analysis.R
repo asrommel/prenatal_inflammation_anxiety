@@ -1,33 +1,16 @@
 # ==============================================================================
-# Inflammatory Predictors of Postpartum Anxiety
-# Clean analysis script aligned with manuscript
-#
-# UPDATED: Fixed hardcoded paths, added error checking, proper output handling
-#
-# Main manuscript outputs:
-#   Figure 1. Flowchart of study sample
-#   Table 1. Participant characteristics by GAD-7 score percentile group
-#   Figure 2. Adjusted associations with postpartum GAD-7 scores
-#
-# Supplementary outputs:
-#   Supplemental Figure S1. Cytokine sample timing across pregnancy
-#   Supplemental Figure S2. Collinearity among continuous covariates
-#   Supplemental Table S1. Full multivariable quantile regression results
-#   Supplemental Table S2. Complete-case quantile regression results
-#   Supplemental Table S3. Quantile regression results restricted
-#                         to participants completing the GAD-7 within 12 weeks postpartum
-#
-# Analytic sample in manuscript:
-#   n = 237
-#   complete-case sensitivity sample: n = 220
-#   <=12 week sensitivity sample: n = 187
+# GAD-7 and Immune Activation Analysis
+# Cohort: Gen C (COVID-era perinatal cohort)
+# Outcome: Postpartum anxiety (GAD-7), completed within 24 weeks postpartum
+# Exposure: Prenatal IL-6, IL-1b, IL-17A, CRP
+# Cytokine filter: LATEST third-trimester sample (>=28 wks), >7 days pre-delivery
 # ==============================================================================
 
 rm(list = ls())
 graphics.off()
 
 # ==============================================================================
-# 0A. FILE PATH SETUP (UPDATED - Use relative paths)
+# 0A. FILE PATH SETUP 
 # ==============================================================================
 
 # Define directories relative to script location
@@ -75,17 +58,22 @@ if (!all_files_present) {
 cat("✓ All required data files found\n\n")
 
 # ==============================================================================
-# 0. PACKAGES
+# 0C. LIBRARIES
 # ==============================================================================
 
 library(Hmisc)
 library(labelled)
+library(quantreg)
 library(dplyr)
 library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(lqmm)
 library(janitor)
+library(DescTools)
 library(mice)
-library(quantreg)
 library(purrr)
+library(openxlsx)
 library(tidyr)
 library(gt)
 library(gtsummary)
@@ -99,7 +87,7 @@ library(rsvg)
 cat("✓ All packages loaded successfully\n\n")
 
 # ==============================================================================
-# 1. LOAD DATA (UPDATED - Use relative paths)
+# 1. LOAD DATA
 # ==============================================================================
 
 cat("--- Loading data files ---\n")
@@ -137,116 +125,92 @@ label(data$birthweight_grams)     <- "Birthweight (grams)"
 label(data$gestationalagedays)    <- "Gestational Age at Delivery (days)"
 label(data$prepregnancybmi)       <- "Pre-pregnancy BMI"
 
-for (tp in c("p3", "s2", "s3")) {
-  label(data[[paste0(tp, "_2w_nerv")]])         <- "Feeling nervous, anxious or on edge"
-  label(data[[paste0(tp, "_2w_uncontrworry")]]) <- "Not being able to stop or control worrying"
-  label(data[[paste0(tp, "_2w_pleasur")]])      <- "Little interest or pleasure in doing things"
-  label(data[[paste0(tp, "_2w_depr")]])         <- "Feeling down, depressed, or hopeless"
-  label(data[[paste0(tp, "_2w_toomuchworry")]]) <- "Worrying too much about different things"
-  label(data[[paste0(tp, "_2w_relax")]])        <- "Trouble relaxing"
-  label(data[[paste0(tp, "_2w_restless")]])     <- "Being so restless that it's hard to sit still"
-  label(data[[paste0(tp, "_2w_annoy")]])        <- "Becoming easily annoyed or irritable"
-  label(data[[paste0(tp, "_2w_afraid")]])       <- "Feeling afraid as if something awful might happen"
+for (tp in c("p3","s2","s3")) {
+  label(data[[paste0(tp,"_2w_nerv")]])         <- "Feeling nervous, anxious or on edge"
+  label(data[[paste0(tp,"_2w_uncontrworry")]]) <- "Not being able to stop or control worrying"
+  label(data[[paste0(tp,"_2w_pleasur")]])      <- "Little interest or pleasure in doing things"
+  label(data[[paste0(tp,"_2w_depr")]])         <- "Feeling down, depressed, or hopeless"
+  label(data[[paste0(tp,"_2w_toomuchworry")]]) <- "Worrying too much about different things"
+  label(data[[paste0(tp,"_2w_relax")]])        <- "Trouble relaxing"
+  label(data[[paste0(tp,"_2w_restless")]])     <- "Being so restless that it's hard to sit still"
+  label(data[[paste0(tp,"_2w_annoy")]])        <- "Becoming easily annoyed or irritable"
+  label(data[[paste0(tp,"_2w_afraid")]])       <- "Feeling afraid as if something awful might happen"
 }
 
 for (i in 1:6) {
-  label(data[[paste0("il6_", i)]])         <- "IL-6"
-  label(data[[paste0("il17a_", i)]])       <- "IL-17A"
-  label(data[[paste0("il1b_", i)]])        <- "IL-1b"
-  label(data[[paste0("crp_", i)]])         <- "CRP"
+  label(data[[paste0("il6_",   i)]]) <- "IL-6"
+  label(data[[paste0("il17a_", i)]]) <- "IL-17A"
+  label(data[[paste0("il1b_",  i)]]) <- "IL-1b"
+  label(data[[paste0("crp_",   i)]]) <- "CRP"
   label(data[[paste0("date_sample_", i)]]) <- paste("Date sample", i)
   label(data[[paste0("processtime_", i)]]) <- paste("Sample", i, "processing time")
 }
 
-for (tp in c("p1", "s1", "s3")) {
-  label(data[[paste0(tp, "_income")]])   <- "Total household income (last year, before taxes)"
-  label(data[[paste0(tp, "_mom_educ")]]) <- "Highest level of education completed"
+for (tp in c("p1","s1","s3")) {
+  label(data[[paste0(tp,"_income")]])   <- "Total household income (last year, before taxes)"
+  label(data[[paste0(tp,"_mom_educ")]]) <- "Highest level of education completed"
 }
 
 # ==============================================================================
 # 3. FACTOR VARIABLES
 # ==============================================================================
 
-data$raceethnicitycombined.factor <- factor(
-  data$raceethnicitycombined,
-  levels = c("1", "2", "3", "4", "5", "6", "7", "8"),
-  labels = c(
-    "American Indian or Alaska Native",
-    "Asian",
-    "Black",
-    "Hispanic",
-    "Native Hawaiian or Other Pacific Islander",
-    "White",
-    "Other",
-    "Unknown"
-  )
-)
+data$raceethnicitycombined.factor <- factor(data$raceethnicitycombined,
+                                            levels = c("1","2","3","4","5","6","7","8"),
+                                            labels = c("American Indian or Alaska Native","Asian","Black",
+                                                       "Hispanic","Native Hawaiian or Other Pacific Islander",
+                                                       "White","Other","Unknown"))
 
-data$insurance_cat.factor <- factor(
-  data$insurance_cat,
-  levels = c("1", "2", "3"),
-  labels = c("Private", "Public", "Self-pay")
-)
+data$insurance_cat.factor <- factor(data$insurance_cat,
+                                    levels = c("1","2","3"), labels = c("Private","Public","Self-pay"))
 
-data$preg_pos.factor <- factor(
-  data$preg_pos,
-  levels = c("1", "0"),
-  labels = c("Yes", "No")
-)
+data$preg_pos.factor <- factor(data$preg_pos, levels = c("1","0"), labels = c("Yes","No"))
 
-data$vaccine_timing.factor <- factor(
-  data$vaccine_timing,
-  levels = c("1", "2", "3"),
-  labels = c("Before pregnancy", "During pregnancy", "After pregnancy")
-)
+data$vaccine_timing.factor <- factor(data$vaccine_timing,
+                                     levels = c("1","2","3"),
+                                     labels = c("Before pregnancy", "During pregnancy", "After pregnancy"))
 
-data$duplicate_enrollment.factor <- factor(
-  data$duplicate_enrollment,
-  levels = c("1", "0"),
-  labels = c("Yes", "No")
-)
+data$duplicate_enrollment.factor <- factor(data$duplicate_enrollment,
+                                           levels = c("1","0"),
+                                           labels = c("Yes","No"))
 
-income_levels <- c(
-  "Less than $25,000",
-  "$25,001 - $50,000",
-  "$50,001 - $75,000",
-  "$75,001 - $100,000",
-  "$100,001 - $125,000",
-  "More than $125,000"
-)
+income_levels <- c("Less than $25,000",
+                   "$25,001 - $50,000",
+                   "$50,001 - $75,000",
+                   "$75,001 - $100,000",
+                   "$100,001 - $125,000",
+                   "More than $125,000")
 
-educ_levels <- c(
-  "Less than 9th grade",
-  "Some high school; no diploma",
-  "High school diploma/GED",
-  "Trade/Technical/Vocational Training",
-  "Some college",
-  "Bachelors degree",
-  "Post-graduate degree"
-)
+educ_levels <- c("Less than 9th grade",
+                 "Some high school; no diploma",
+                 "High school diploma/GED",
+                 "Trade/Technical/Vocational Training",
+                 "Some college",
+                 "Bachelors degree",
+                 "Post-graduate degree")
 
-for (tp in c("p1", "s1", "s3")) {
-  data[[paste0(tp, "_income.factor")]] <-
-    factor(data[[paste0(tp, "_income")]], levels = 1:6, labels = income_levels)
-  
-  data[[paste0(tp, "_mom_educ.factor")]] <-
-    factor(data[[paste0(tp, "_mom_educ")]], levels = 1:7, labels = educ_levels)
+for (tp in c("p1","s1","s3")) {
+  data[[paste0(tp,"_income.factor")]] <-
+    factor(data[[paste0(tp,"_income")]], levels = 1:6, labels = income_levels)
+
+  data[[paste0(tp,"_mom_educ.factor")]] <-
+    factor(data[[paste0(tp,"_mom_educ")]], levels = 1:7, labels = educ_levels)
 }
 
 # Treat NA preg_pos as "No"
 data$preg_pos.factor[is.na(data$preg_pos.factor)] <- "No"
 data$preg_pos[is.na(data$preg_pos)] <- 0
 
+
 # ==============================================================================
 # 4. CORRECT s2 SURVEY SCORING
 # ==============================================================================
 
-s2_items <- paste0(
-  "s2_2w_",
-  c("nerv", "uncontrworry", "pleasur", "depr", "toomuchworry", "relax", "restless", "annoy", "afraid")
-)
+s2_items <- paste0("s2_2w_",
+                   c("nerv", "uncontrworry", "pleasur", "depr", "toomuchworry", "relax", "restless", "annoy", "afraid"))
 
-data[, s2_items] <- data[, s2_items] - 1
+data[,s2_items] <- data[,s2_items] - 1
+
 
 # ==============================================================================
 # 5. GAD-7 SCORES
@@ -255,15 +219,15 @@ data[, s2_items] <- data[, s2_items] - 1
 gad_items <- c("nerv", "uncontrworry", "toomuchworry", "relax", "restless", "annoy", "afraid")
 phq_items <- c("depr", "pleasur")
 
-for (tp in c("p3", "s2", "s3")) {
-  data[[paste0(tp, "_2w_GAD.score")]] <-
-    rowSums(data[, paste0(tp, "_2w_", gad_items)], na.rm = FALSE)
-  
-  data[[paste0(tp, "_2w_PHQ.score")]] <-
-    rowSums(data[, paste0(tp, "_2w_", phq_items)], na.rm = FALSE)
-  
-  data[[paste0(tp, "_2w_GAD.score")]] <-
-    unclass(remove_labels(data[[paste0(tp, "_2w_GAD.score")]], user_na_to_na = TRUE))
+for (tp in c("p3","s2","s3")) {
+  data[[paste0(tp,"_2w_GAD.score")]] <-
+    rowSums(data[,paste0(tp,"_2w_",gad_items)], na.rm = FALSE)
+
+  data[[paste0(tp,"_2w_PHQ.score")]] <-
+    rowSums(data[,paste0(tp,"_2w_",phq_items)], na.rm = FALSE)
+
+  data[[paste0(tp,"_2w_GAD.score")]] <-
+    unclass(remove_labels(data[[paste0(tp,"_2w_GAD.score")]], user_na_to_na = TRUE))
 }
 
 data$GAD.score <- coalesce(data$p3_2w_GAD.score, data$s2_2w_GAD.score, data$s3_2w_GAD.score)
@@ -278,20 +242,17 @@ data <- data %>%
       GAD.score < 5 ~ "Minimal Anxiety",
       GAD.score >= 5 & GAD.score < 10 ~ "Mild Anxiety",
       GAD.score >= 10 & GAD.score < 15 ~ "Moderate Anxiety",
-      GAD.score >= 15 ~ "Severe Anxiety"
-    ),
+      GAD.score >= 15 ~ "Severe Anxiety"),
     para_factor = case_when(
       para == 0 ~ "0",
       para == 1 ~ "1",
       para == 2 ~ "2",
       para == 3 ~ "3",
-      para >= 4 ~ "4+"
-    ),
+      para >= 4 ~ "4+"),
     para_binary = factor(
       ifelse(para == 0, "Nulliparous", "Multiparous"),
-      levels = c("Nulliparous", "Multiparous")
-    )
-  )
+      levels = c("Nulliparous", "Multiparous")))
+
 
 # ==============================================================================
 # 6. HANDLE OUT-OF-RANGE CYTOKINE VALUES
@@ -309,18 +270,15 @@ replace_oor <- function(value, all_empty, limit) {
   ifelse(!all_empty & value %in% c("OOR", "0", "OOR <"), limit, value)
 }
 
-# Detection limits for each marker (assay-specific)
 detect_limits <- list(il6 = "0.01", il1b = "0.03", il17a = "0.64")
 
 for (marker in names(detect_limits)) {
   for (i in 1:6) {
     data[[paste0(marker, "_", i)]] <-
-      mapply(
-        replace_oor,
-        data[[paste0(marker, "_", i)]],
-        data[[paste0("sample.empty_", i)]],
-        detect_limits[[marker]]
-      )
+      mapply(replace_oor,
+             data[[paste0(marker, "_", i)]],
+             data[[paste0("sample.empty_", i)]],
+             detect_limits[[marker]])
   }
 }
 
@@ -335,14 +293,8 @@ for (i in 1:6) {
 # 7. CONVERT CYTOKINES AND DATES
 # ==============================================================================
 
-cyto_cols <- c(
-  paste0("il6_", 1:6),
-  paste0("il17a_", 1:6),
-  paste0("il1b_", 1:6),
-  paste0("crp_", 1:6)
-)
-
-data[, cyto_cols] <- lapply(data[, cyto_cols], as.numeric)
+cyto_cols <- c(paste0("il6_",1:6), paste0("il17a_",1:6), paste0("il1b_",1:6), paste0("crp_",1:6))
+data[,cyto_cols] <- lapply(data[,cyto_cols], as.numeric)
 
 data$birthdate <- as.Date(data$birthdate)
 
@@ -365,11 +317,9 @@ subset <- data[!is.na(data$GAD.score) & has_cyto, ]
 
 subset$s3_timestamp[subset$subject_id == 476] <- "2020-12-08"
 
-subset$mom_educ.factor <- coalesce(
-  subset$p1_mom_educ.factor,
-  subset$s1_mom_educ.factor,
-  subset$s3_mom_educ.factor
-)
+subset$mom_educ.factor <- coalesce(subset$p1_mom_educ.factor,
+                                   subset$s1_mom_educ.factor,
+                                   subset$s3_mom_educ.factor)
 
 subset$p3_timestamp <- as.Date(subset$p3_timestamp)
 subset$s2_timestamp <- as.Date(subset$s2_timestamp)
@@ -395,19 +345,14 @@ subset <- subset %>%
   mutate(
     raceethnicitycombined.factor = fct_collapse(
       raceethnicitycombined.factor,
-      "Other" = c(
-        "American Indian or Alaska Native",
-        "Native Hawaiian or Other Pacific Islander",
-        "Other"
-      )
-    ),
+      "Other" = c("American Indian or Alaska Native",
+                  "Native Hawaiian or Other Pacific Islander",
+                  "Other")),
     mom_educ.factor = fct_collapse(
       mom_educ.factor,
       "< High school diploma" = c("Less than 9th grade", "Some high school; no diploma"),
       "≤ Some college" = c("High school diploma/GED", "Trade/Technical/Vocational Training", "Some college"),
-      "≥ Bachelors" = c("Bachelors degree", "Post-graduate degree")
-    )
-  )
+      "≥ Bachelors" = c("Bachelors degree", "Post-graduate degree")))
 
 # ==============================================================================
 # 11. MERGE MENTAL HEALTH HISTORY
@@ -470,14 +415,12 @@ lmmData <- subset.rename %>%
   pivot_longer(
     matches("^(.*)_([0-9])$"),
     names_to = c(".value"),
-    names_pattern = "^(.*)_[0-9]$"
-  ) %>%
+    names_pattern = "^(.*)_[0-9]$") %>%
   rename(gest_age_sample_day = gest_age_sample) %>%
   mutate(gest_age_sample_wk = as.numeric(floor(gest_age_sample_day / 7)))
 
 # ==============================================================================
 # 15. MERGE LOGBOOK
-#     KEEP THIS SECTION: logbook is used for sample-level timing information
 # ==============================================================================
 
 logbook <- logbook %>%
@@ -486,8 +429,7 @@ logbook <- logbook %>%
   mutate(
     pick.date  = as.Date(pickup_date, format = "%m/%d/%y"),
     drop.date  = as.Date(dropoff_date, format = "%m/%d/%y"),
-    subject_id = suppressWarnings(as.numeric(subject_id))
-  ) %>%
+    subject_id = suppressWarnings(as.numeric(subject_id))) %>%
   filter(!is.na(subject_id))
 
 lmmData$date_sample <- as.Date(lmmData$date_sample, format = "%Y-%m-%d")
@@ -499,8 +441,7 @@ logbook <- logbook[-1153, ]
 join <- left_join(
   lmmData,
   logbook,
-  by = join_by(subject_id, closest(date_sample <= drop.date))
-)
+  by = join_by(subject_id, closest(date_sample <= drop.date)))
 
 lmmData <- join %>%
   relocate(subject_id, date_sample, drop.date, pick.date, il6, il1b, il17a, crp, notes)
@@ -517,11 +458,9 @@ for (marker in c("il6", "il17a", "il1b", "crp")) {
 lmmData$days_before_delivery <- as.numeric(lmmData$birthdate - lmmData$date_sample)
 
 lmmData.T3 <- lmmData %>%
-  filter(
-    gest_age_sample_wk >= 28,
-    days_before_delivery > 7,
-    if_any(c("il1b", "il6", "il17a", "crp"), is.finite)
-  ) %>%
+  filter(gest_age_sample_wk >= 28,
+         days_before_delivery > 7,
+         if_any(c("il1b", "il6", "il17a", "crp"), is.finite)) %>%
   group_by(subject_id) %>%
   slice_max(order_by = gest_age_sample_wk, n = 1, with_ties = FALSE) %>%
   ungroup()
@@ -544,8 +483,7 @@ lmmData.T3 <- lmmData.T3 %>%
   mutate(
     GAD_days_postpart = as.numeric(GAD_days_postpart),
     days_since_pandemic = as.numeric(days_since_pandemic),
-    GAD_wks_postpart = GAD_days_postpart / 7
-  )
+    GAD_wks_postpart = GAD_days_postpart / 7)
 
 # Gestational age at sampling in weeks
 lmmData.T3$date_sample <- as.Date(lmmData.T3$date_sample)
@@ -607,25 +545,22 @@ race_tab <- prop.table(table(lmmData.T3$raceethnicitycombined.factor)) * 100
 race_tab <- round(race_tab, 1)
 
 cat("\n--- Manuscript-ready descriptive values ---\n")
-cat(
-  "The median postpartum GAD-7 score was", gad_iqr[2],
-  "(IQR,", gad_iqr[1], "–", gad_iqr[3], "), with the 75th and 90th percentiles at",
-  gad_pcts[1], "and", gad_pcts[2], ", respectively. GAD-7 scores ranged from",
-  gad_range[1], "to", gad_range[2], ", with a mean of",
-  round(mean(lmmData.T3$GAD.score, na.rm = TRUE), 1),
-  "(SD", round(sd(lmmData.T3$GAD.score, na.rm = TRUE), 1), ").",
-  "The median timing of GAD-7 completion was", round(gad_time_iqr[2], 1),
-  "weeks postpartum (IQR,", round(gad_time_iqr[1], 1), "–", round(gad_time_iqr[3], 1), ").",
-  "The median maternal age at enrollment was", round(age_iqr[2], 0),
-  "years (IQR,", round(age_iqr[1], 0), "–", round(age_iqr[3], 0), ").",
-  "Participants were predominantly White (", race_tab["White"], "%) and Hispanic (", race_tab["Hispanic"],
-  "%), with smaller proportions identifying as Asian (", race_tab["Asian"],
-  "%), Black (", race_tab["Black"], "%), or Other (", race_tab["Other"], "%).",
-  "\n"
-)
+cat("The median postpartum GAD-7 score was", gad_iqr[2],
+    "(IQR,", gad_iqr[1], "–", gad_iqr[3], "), with the 75th and 90th percentiles at",
+    gad_pcts[1], "and", gad_pcts[2], ", respectively. GAD-7 scores ranged from",
+    gad_range[1], "to", gad_range[2], ", with a mean of",
+    round(mean(lmmData.T3$GAD.score, na.rm = TRUE), 1),
+    "(SD", round(sd(lmmData.T3$GAD.score, na.rm = TRUE), 1), ").",
+    "The median timing of GAD-7 completion was", round(gad_time_iqr[2], 1),
+    "weeks postpartum (IQR,", round(gad_time_iqr[1], 1), "–", round(gad_time_iqr[3], 1), ").",
+    "The median maternal age at enrollment was", round(age_iqr[2], 0),
+    "years (IQR,", round(age_iqr[1], 0), "–", round(age_iqr[3], 0), ").",
+    "Participants were predominantly White (", race_tab["White"], "%) and Hispanic (", race_tab["Hispanic"],
+    "%), with smaller proportions identifying as Asian (", race_tab["Asian"],
+    "%), Black (", race_tab["Black"], "%), or Other (", race_tab["Other"], "%).\n")
 
 # ==============================================================================
-# 21. SUPPLEMENTAL FIGURE S1. Timing distributions for cytokine sampling and postpartum anxiety assessment
+# 21. SUPPLEMENTAL FIGURE S1
 # ==============================================================================
 
 png(file.path(output_dir, "Supplemental_Figure_S1_Timing_Distributions.png"),
@@ -633,35 +568,24 @@ png(file.path(output_dir, "Supplemental_Figure_S1_Timing_Distributions.png"),
 
 par(mfrow = c(1,3), mar = c(4,4,3,1))
 
-hist(
-  lmmData$gest_age_sample_wk,
-  breaks = 20,
-  col = "#acdffbff",
-  xlab = "Gestational age (weeks)",
-  main = "A. Cytokine sample timing",
-  xlim = c(0,42),
-  xaxp = c(0,42,7)
-)
+hist(lmmData$gest_age_sample_wk,
+     breaks = 20, col = "#acdffbff",
+     xlab = "Gestational age (weeks)",
+     main = "A. Cytokine sample timing",
+     xlim = c(0,42), xaxp = c(0,42,7))
 
-hist(
-  lmmData.T3$GAD_wks_postpart,
-  breaks = seq(-0.5, 24.5, by = 1),
-  xlim = c(-0.5, 24.5),
-  xaxt = "n",
-  col = "#acdffbff",
-  border = "black",
-  xlab = "Weeks postpartum",
-  main = "B. GAD-7 completion timing"
-)
+hist(lmmData.T3$GAD_wks_postpart,
+     breaks = seq(-0.5, 24.5, by = 1),
+     xlim = c(-0.5, 24.5), xaxt = "n",
+     col = "#acdffbff", border = "black",
+     xlab = "Weeks postpartum",
+     main = "B. GAD-7 completion timing")
 axis(1, at = seq(0, 24, by = 4), labels = seq(0, 24, by = 4))
 
-hist(
-  as.numeric(lmmData.T3$days_since_pandemic),
-  breaks = 20,
-  col = "#acdffbff",
-  xlab = "Days since March 1, 2020",
-  main = "C. Timing relative to pandemic onset"
-)
+hist(as.numeric(lmmData.T3$days_since_pandemic),
+     breaks = 20, col = "#acdffbff",
+     xlab = "Days since March 1, 2020",
+     main = "C. Timing relative to pandemic onset")
 
 dev.off()
 
@@ -670,42 +594,31 @@ pdf(file.path(output_dir, "Supplemental_Figure_S1_Timing_Distributions.pdf"),
 
 par(mfrow = c(1,3), mar = c(4,4,3,1))
 
-hist(
-  lmmData$gest_age_sample_wk,
-  breaks = 20,
-  col = "#acdffbff",
-  xlab = "Gestational age (weeks)",
-  main = "A. Cytokine sample timing",
-  xlim = c(0,42),
-  xaxp = c(0,42,7)
-)
+hist(lmmData$gest_age_sample_wk,
+     breaks = 20, col = "#acdffbff",
+     xlab = "Gestational age (weeks)",
+     main = "A. Cytokine sample timing",
+     xlim = c(0,42), xaxp = c(0,42,7))
 
-hist(
-  lmmData.T3$GAD_wks_postpart,
-  breaks = seq(-0.5, 24.5, by = 1),
-  xlim = c(-0.5, 24.5),
-  xaxt = "n",
-  col = "#acdffbff",
-  border = "black",
-  xlab = "Weeks postpartum",
-  main = "B. GAD-7 completion timing"
-)
+hist(lmmData.T3$GAD_wks_postpart,
+     breaks = seq(-0.5, 24.5, by = 1),
+     xlim = c(-0.5, 24.5), xaxt = "n",
+     col = "#acdffbff", border = "black",
+     xlab = "Weeks postpartum",
+     main = "B. GAD-7 completion timing")
 axis(1, at = seq(0, 24, by = 4), labels = seq(0, 24, by = 4))
 
-hist(
-  as.numeric(lmmData.T3$days_since_pandemic),
-  breaks = 20,
-  col = "#acdffbff",
-  xlab = "Days since March 1, 2020",
-  main = "C. Timing relative to pandemic onset"
-)
+hist(as.numeric(lmmData.T3$days_since_pandemic),
+     breaks = 20, col = "#acdffbff",
+     xlab = "Days since March 1, 2020",
+     main = "C. Timing relative to pandemic onset")
 
 dev.off()
 
 cat("✓ Created Supplemental Figure S1\n")
 
 # ==============================================================================
-# 22. SUPPLEMENTAL FIGURE S2. COLLINEARITY CHECK
+# 22. SUPPLEMENTAL FIGURE S2
 # ==============================================================================
 
 cont_vars <- c("maternalage", "prepregnancybmi", "GAD_days_postpart", "days_since_pandemic")
@@ -718,25 +631,17 @@ cor_matrix <- cor(cont_mat, use = "pairwise.complete.obs")
 print(round(cor_matrix, 3))
 
 pdf(file.path(output_dir, "Supplemental_Figure_S2_Collinearity.pdf"), width = 7, height = 7)
-pairs(
-  cont_mat,
-  main = "Supplemental Figure S2. Collinearity among continuous covariates",
-  pch = 16,
-  col = "#acdffbff",
-  cex = 0.5,
-  labels = c("Maternal age", "Pre-pregnancy BMI", "Days postpartum", "Days since pandemic")
-)
+pairs(cont_mat,
+      main = "Supplemental Figure S2. Collinearity among continuous covariates",
+      pch = 16, col = "#acdffbff", cex = 0.5,
+      labels = c("Maternal age", "Pre-pregnancy BMI", "Days postpartum", "Days since pandemic"))
 dev.off()
 
 png(file.path(output_dir, "Supplemental_Figure_S2_Collinearity.png"), width = 1800, height = 1800, res = 300)
-pairs(
-  cont_mat,
-  main = "Supplemental Figure S2. Collinearity among continuous covariates",
-  pch = 16,
-  col = "#acdffbff",
-  cex = 0.5,
-  labels = c("Maternal age", "Pre-pregnancy BMI", "Days postpartum", "Days since pandemic")
-)
+pairs(cont_mat,
+      main = "Supplemental Figure S2. Collinearity among continuous covariates",
+      pch = 16, col = "#acdffbff", cex = 0.5,
+      labels = c("Maternal age", "Pre-pregnancy BMI", "Days postpartum", "Days since pandemic"))
 dev.off()
 
 cat("✓ Created Supplemental Figure S2\n")
@@ -782,24 +687,20 @@ taus <- c(0.5, 0.75, 0.90)
 pool_qr <- function(marker, tau_val, covariates, imp) {
   fits <- lapply(1:imp$m, function(i) {
     d <- complete(imp, i)
-    rq(
-      as.formula(paste("GAD.score ~", marker, "+", covariates)),
-      tau = tau_val,
-      data = d,
-      model = TRUE
-    )
+    rq(as.formula(paste("GAD.score ~", marker, "+", covariates)),
+       tau = tau_val, data = d, model = TRUE)
   })
-  
+
   coef_mat <- do.call(cbind, lapply(fits, function(f) {
     cf <- coef(f)
     matrix(cf, ncol = 1, dimnames = list(names(cf), NULL))
   }))
-  
+
   var_mat <- do.call(cbind, lapply(fits, function(f) {
     s <- summary(f, se = "iid")$coefficients
     matrix(s[, "Std. Error"]^2, ncol = 1, dimnames = list(rownames(s), NULL))
   }))
-  
+
   Q_bar <- rowMeans(coef_mat)
   U_bar <- rowMeans(var_mat)
   B <- apply(coef_mat, 1, var)
@@ -807,15 +708,8 @@ pool_qr <- function(marker, tau_val, covariates, imp) {
   se <- sqrt(T_var)
   z <- Q_bar / se
   p <- 2 * pnorm(-abs(z))
-  
-  data.frame(
-    term = names(Q_bar),
-    estimate = Q_bar,
-    se = se,
-    z = z,
-    p = p,
-    row.names = NULL
-  )
+
+  data.frame(term = names(Q_bar), estimate = Q_bar, se = se, z = z, p = p, row.names = NULL)
 }
 
 cat("\n--- Running quantile regression models ---\n")
@@ -855,8 +749,7 @@ tab1_base <- lmmData.T3 %>%
     days_since_pandemic = as.numeric(days_since_pandemic),
     parity_binary = factor(
       case_when(para == 0 ~ "Nulliparous", para >= 1 ~ "Parous"),
-      levels = c("Nulliparous", "Parous")
-    ),
+      levels = c("Nulliparous", "Parous")),
     gad_pct = factor(
       case_when(
         GAD.score <= quantile(GAD.score, 0.50) ~ "50th percentile",
@@ -864,8 +757,7 @@ tab1_base <- lmmData.T3 %>%
         GAD.score <= quantile(GAD.score, 0.90) ~ "90th percentile",
         GAD.score > quantile(GAD.score, 0.90) ~ "Above 90th percentile"
       ),
-      levels = c("50th percentile", "75th percentile", "90th percentile", "Above 90th percentile")
-    ),
+      levels = c("50th percentile", "75th percentile", "90th percentile", "Above 90th percentile")),
     preg_pos.factor = as.factor(preg_pos.factor),
     raceethnicitycombined.factor = fct_relevel(
       droplevels(raceethnicitycombined.factor),
@@ -932,19 +824,15 @@ cat("✓ Created Table 1\n")
 table2_dat <- primary_qr_results %>%
   filter(term == marker) %>%
   mutate(
-    Marker = recode(
-      marker,
-      "il1b.log" = "IL-1β",
-      "il6.log" = "IL-6",
-      "il17a.log" = "IL-17A",
-      "crp.log" = "CRP"
-    ),
-    Percentile = recode(
-      as.character(tau),
-      "0.5" = "50th percentile",
-      "0.75" = "75th percentile",
-      "0.9" = "90th percentile"
-    ),
+    Marker = recode(marker,
+                    "il1b.log" = "IL-1β",
+                    "il6.log" = "IL-6",
+                    "il17a.log" = "IL-17A",
+                    "crp.log" = "CRP"),
+    Percentile = recode(as.character(tau),
+                        "0.5" = "50th percentile",
+                        "0.75" = "75th percentile",
+                        "0.9" = "90th percentile"),
     `Estimate (FDR-adjusted p-value)` = sprintf("%.2f (p=%.3f)", estimate, p_fdr)
   ) %>%
   select(Marker, Percentile, `Estimate (FDR-adjusted p-value)`)
@@ -955,10 +843,7 @@ table2_wide <- table2_dat %>%
     Percentile = factor(Percentile, levels = c("50th percentile", "75th percentile", "90th percentile"))
   ) %>%
   arrange(Marker, Percentile) %>%
-  pivot_wider(
-    names_from = Percentile,
-    values_from = `Estimate (FDR-adjusted p-value)`
-  )
+  pivot_wider(names_from = Percentile, values_from = `Estimate (FDR-adjusted p-value)`)
 
 table2_gt <- table2_wide %>%
   gt() %>%
@@ -1055,7 +940,6 @@ cat("✓ Created Figure 1 (Flowchart)\n")
 
 # ==============================================================================
 # 28. FIGURE 2. ADJUSTED ASSOCIATIONS WITH POSTPARTUM GAD-7 SCORES
-#     Includes inflammatory markers + psychiatric history
 # ==============================================================================
 
 forest_rows <- list()
@@ -1063,27 +947,27 @@ psych_rows_collected <- character(0)
 
 for (marker in c("il6.log", "il17a.log", "il1b.log", "crp.log")) {
   for (tau_val in taus) {
-    
+
     res <- tryCatch(
       pool_qr(marker, tau_val, covariates, imp),
       error = function(e) NULL
     )
     if (is.null(res)) next
-    
+
     cyto_row <- res %>%
       filter(term == marker) %>%
       mutate(marker = marker, tau = tau_val)
-    
+
     if (nrow(cyto_row) == 1) {
       forest_rows[[length(forest_rows) + 1]] <- cyto_row
     }
-    
+
     key <- as.character(tau_val)
     if (!key %in% psych_rows_collected) {
       psych_row <- res %>%
         filter(term == "depranxYes") %>%
         mutate(marker = "depranx", tau = tau_val)
-      
+
       if (nrow(psych_row) == 1) {
         forest_rows[[length(forest_rows) + 1]] <- psych_row
         psych_rows_collected <- c(psych_rows_collected, key)
@@ -1112,7 +996,7 @@ forest_df <- forest_df %>%
     marker_label = factor(
       marker,
       levels = c("depranx", "crp.log", "il17a.log", "il6.log", "il1b.log"),
-      labels = c("History of anxiety/depression", "CRP", "IL-17A", "IL-6", "IL-1\u03b2")
+      labels = c("History of anxiety/depression", "CRP", "IL-17A", "IL-6", "IL-1β")
     ),
     tau_label = factor(
       tau,
@@ -1202,7 +1086,7 @@ ggsave(
 cat("✓ Created Figure 2 (Forest Plot)\n")
 
 # ==============================================================================
-# 29. SUPPLEMENTAL TABLE S1. FULL MULTIVARIABLE QUANTILE REGRESSION RESULTS
+# 29. SUPPLEMENTAL TABLE S1
 # ==============================================================================
 
 pretty_term_names <- c(
@@ -1270,10 +1154,7 @@ percentile_map <- c(
 all_results_s1 <- map_dfr(c("il1b.log", "il6.log", "il17a.log", "crp.log"), function(marker) {
   map_dfr(c(0.5, 0.75, 0.9), function(tau_val) {
     pool_qr(marker, tau_val, covariates, imp) %>%
-      mutate(
-        marker = marker,
-        tau = tau_val
-      )
+      mutate(marker = marker, tau = tau_val)
   })
 })
 
@@ -1382,422 +1263,7 @@ write.csv(
 cat("✓ Created Supplemental Table S1\n")
 
 # ==============================================================================
-# 30. SENSITIVITY ANALYSIS 1. COMPLETE-CASE QUANTILE REGRESSION
-# ==============================================================================
-
-cc_vars <- c(
-  "GAD.score", "maternalage", "raceethnicitycombined.factor", "para_binary",
-  "mom_educ.factor", "preg_pos.factor", "GAD_days_postpart",
-  "days_since_pandemic", "prepregnancybmi", "depranx",
-  "il6.log", "il17a.log", "il1b.log", "crp.log"
-)
-
-lmmData.T3.cc <- lmmData.T3 %>%
-  mutate(
-    GAD_days_postpart = as.numeric(GAD_days_postpart),
-    days_since_pandemic = as.numeric(days_since_pandemic),
-    mom_educ.factor = factor(mom_educ.factor),
-    raceethnicitycombined.factor = factor(raceethnicitycombined.factor),
-    para_binary = factor(para_binary),
-    preg_pos.factor = factor(preg_pos.factor),
-    depranx = factor(depranx)
-  ) %>%
-  filter(if_all(all_of(cc_vars), ~ !is.na(.)))
-
-cat("\n--- Sensitivity analysis 1: complete-case sample ---\n")
-cat("N complete-case:", nrow(lmmData.T3.cc), "\n")
-
-extract_qr_journal <- function(data_in, marker, marker_label) {
-  percentiles <- c(
-    "0.5" = "50th percentile",
-    "0.75" = "75th percentile",
-    "0.9" = "90th percentile"
-  )
-  
-  map_dfr(names(percentiles), function(tau_chr) {
-    tau_val <- as.numeric(tau_chr)
-    
-    fml <- reformulate(
-      c(
-        marker,
-        "maternalage",
-        "raceethnicitycombined.factor",
-        "para_binary",
-        "mom_educ.factor",
-        "preg_pos.factor",
-        "GAD_days_postpart",
-        "days_since_pandemic",
-        "prepregnancybmi",
-        "depranx"
-      ),
-      response = "GAD.score"
-    )
-    
-    fit <- rq(fml, tau = tau_val, data = data_in, model = TRUE)
-    summ <- summary(fit, se = "boot")$coefficients
-    
-    tibble(
-      Marker = marker_label,
-      Variable = rownames(summ),
-      Percentile = percentiles[[tau_chr]],
-      beta = summ[, 1],
-      se = summ[, 2],
-      ci_lo = summ[, 1] - 1.96 * summ[, 2],
-      ci_hi = summ[, 1] + 1.96 * summ[, 2],
-      p = summ[, 4]
-    )
-  })
-}
-
-pretty_variable_names_cc <- c(
-  "(Intercept)" = "Intercept",
-  "il1b.log" = "IL-1β",
-  "il6.log" = "IL-6",
-  "il17a.log" = "IL-17A",
-  "crp.log" = "CRP",
-  "maternalage" = "Maternal age",
-  "raceethnicitycombined.factorAsian" = "Asian",
-  "raceethnicitycombined.factorBlack" = "Black",
-  "raceethnicitycombined.factorHispanic" = "Hispanic",
-  "raceethnicitycombined.factorWhite" = "White",
-  "para_binaryMultiparous" = "Multiparous",
-  "mom_educ.factor≤ Some college" = "≤ Some college",
-  "mom_educ.factor≥ Bachelors" = "≥ Bachelor's degree",
-  "preg_pos.factorNo" = "No SARS-CoV-2 infection during pregnancy",
-  "GAD_days_postpart" = "Days postpartum at GAD-7",
-  "days_since_pandemic" = "Days since pandemic onset",
-  "prepregnancybmi" = "Pre-pregnancy BMI",
-  "depranxYes" = "History of anxiety or depression"
-)
-
-marker_order_cc <- c("IL-1β", "IL-6", "IL-17A", "CRP")
-variable_order_cc <- c(
-  "Intercept", "IL-1β", "IL-6", "IL-17A", "CRP", "Maternal age",
-  "Asian", "Black", "Hispanic", "White", "Multiparous",
-  "≤ Some college", "≥ Bachelor's degree",
-  "No SARS-CoV-2 infection during pregnancy",
-  "Days postpartum at GAD-7", "Days since pandemic onset",
-  "Pre-pregnancy BMI", "History of anxiety or depression"
-)
-
-make_journal_qr_table <- function(data_in, table_title = NULL) {
-  results_raw <- bind_rows(
-    extract_qr_journal(data_in, "il1b.log", "IL-1β"),
-    extract_qr_journal(data_in, "il6.log", "IL-6"),
-    extract_qr_journal(data_in, "il17a.log", "IL-17A"),
-    extract_qr_journal(data_in, "crp.log", "CRP")
-  )
-  
-  results_fmt <- results_raw %>%
-    mutate(
-      Variable = recode(Variable, !!!pretty_variable_names_cc),
-      `β (95% CI)` = sprintf("%.2f (%.2f, %.2f)", beta, ci_lo, ci_hi)
-    ) %>%
-    select(Marker, Variable, Percentile, `β (95% CI)`) %>%
-    pivot_wider(names_from = Percentile, values_from = `β (95% CI)`) %>%
-    mutate(
-      Marker = factor(Marker, levels = marker_order_cc),
-      Variable = factor(Variable, levels = variable_order_cc)
-    ) %>%
-    arrange(Marker, Variable) %>%
-    mutate(Marker = ifelse(duplicated(Marker), "", as.character(Marker)))
-  
-  gt_tbl <- results_fmt %>%
-    gt() %>%
-    cols_label(
-      Marker = "Marker",
-      Variable = "Variable",
-      `50th percentile` = "50th percentile",
-      `75th percentile` = "75th percentile",
-      `90th percentile` = "90th percentile"
-    ) %>%
-    tab_style(
-      style = cell_text(weight = "bold"),
-      locations = cells_body(columns = Marker, rows = Marker != "")
-    ) %>%
-    cols_align(align = "left", columns = c(Marker, Variable)) %>%
-    cols_align(
-      align = "center",
-      columns = c(`50th percentile`, `75th percentile`, `90th percentile`)
-    ) %>%
-    tab_options(
-      table.font.size = 11,
-      data_row.padding = px(4),
-      table.border.top.width = px(1),
-      table.border.bottom.width = px(1),
-      heading.border.bottom.width = px(1)
-    )
-  
-  if (!is.null(table_title)) {
-    gt_tbl <- gt_tbl %>% tab_header(title = table_title)
-  }
-  
-  gt_tbl
-}
-
-supp_table_s2 <- make_journal_qr_table(
-  lmmData.T3.cc,
-  table_title = "Supplemental Table S2. Complete-case quantile regression results"
-)
-
-supp_table_s2
-gtsave(supp_table_s2, file.path(output_dir, "Supplemental_Table_S2_Complete_Case_Quantile_Regression_Results.docx"))
-
-cat("✓ Created Supplemental Table S2 (Complete-Case Analysis)\n")
-
-# ==============================================================================
-# 31. SENSITIVITY ANALYSIS 2. <=12 WEEKS POSTPARTUM
-# ==============================================================================
-
-lmmData.T3.12wk <- lmmData.T3 %>%
-  mutate(
-    GAD_days_postpart   = as.numeric(GAD_days_postpart),
-    days_since_pandemic = as.numeric(days_since_pandemic),
-    mom_educ.factor = factor(mom_educ.factor),
-    raceethnicitycombined.factor = factor(raceethnicitycombined.factor),
-    para_binary = factor(para_binary),
-    preg_pos.factor = factor(preg_pos.factor),
-    depranx = factor(depranx)
-  ) %>%
-  filter(GAD_wks_postpart <= 12)
-
-cat("\n--- Sensitivity analysis 2: <=12 weeks postpartum before imputation ---\n")
-cat("N <=12 weeks:", nrow(lmmData.T3.12wk), "\n")
-
-imp_vars_12wk <- c(
-  "GAD.score",
-  "mom_educ.factor",
-  "maternalage",
-  "raceethnicitycombined.factor",
-  "para_binary",
-  "preg_pos.factor",
-  "prepregnancybmi",
-  "depranx",
-  "GAD_days_postpart",
-  "days_since_pandemic",
-  "il6.log",
-  "il17a.log",
-  "il1b.log",
-  "crp.log"
-)
-
-imp_data_12wk <- lmmData.T3.12wk %>%
-  select(all_of(imp_vars_12wk))
-
-cat("N missing education in <=12 week sample:",
-    sum(is.na(imp_data_12wk$mom_educ.factor)), "\n")
-
-set.seed(42)
-imp_12wk <- mice(
-  imp_data_12wk,
-  m = 50,
-  method = "pmm",
-  printFlag = FALSE
-)
-
-cat("Imputed sample size:", nrow(complete(imp_12wk, 1)), "\n")
-
-covariates <- paste(
-  "maternalage + raceethnicitycombined.factor + para_binary + mom_educ.factor",
-  "+ preg_pos.factor + GAD_days_postpart + days_since_pandemic",
-  "+ prepregnancybmi + depranx"
-)
-
-pool_qr_12wk <- function(marker, tau_val, covariates, imp_obj) {
-  fits <- lapply(1:imp_obj$m, function(i) {
-    d <- complete(imp_obj, i)
-    rq(
-      as.formula(paste("GAD.score ~", marker, "+", covariates)),
-      tau = tau_val,
-      data = d,
-      model = TRUE
-    )
-  })
-  
-  coef_mat <- do.call(cbind, lapply(fits, function(f) {
-    cf <- coef(f)
-    matrix(cf, ncol = 1, dimnames = list(names(cf), NULL))
-  }))
-  
-  var_mat <- do.call(cbind, lapply(fits, function(f) {
-    s <- summary(f, se = "iid")$coefficients
-    matrix(
-      s[, "Std. Error"]^2,
-      ncol = 1,
-      dimnames = list(rownames(s), NULL)
-    )
-  }))
-  
-  Q_bar <- rowMeans(coef_mat)
-  U_bar <- rowMeans(var_mat)
-  B     <- apply(coef_mat, 1, var)
-  T_var <- U_bar + (1 + 1 / imp_obj$m) * B
-  se    <- sqrt(T_var)
-  z     <- Q_bar / se
-  p     <- 2 * pnorm(-abs(z))
-  
-  data.frame(
-    term = names(Q_bar),
-    estimate = Q_bar,
-    se = se,
-    ci_lo = Q_bar - 1.96 * se,
-    ci_hi = Q_bar + 1.96 * se,
-    z = z,
-    p = p,
-    row.names = NULL
-  )
-}
-
-make_journal_qr_table_imputed <- function(imp_obj, table_title = NULL) {
-  
-  percentiles <- c(
-    "0.5"  = "50th percentile",
-    "0.75" = "75th percentile",
-    "0.9"  = "90th percentile"
-  )
-  
-  marker_map <- c(
-    "il1b.log"  = "IL-1β",
-    "il6.log"   = "IL-6",
-    "il17a.log" = "IL-17A",
-    "crp.log"   = "CRP"
-  )
-  
-  pretty_variable_names <- c(
-    "(Intercept)" = "Intercept",
-    "il1b.log" = "IL-1β",
-    "il6.log" = "IL-6",
-    "il17a.log" = "IL-17A",
-    "crp.log" = "CRP",
-    "maternalage" = "Maternal age",
-    "raceethnicitycombined.factorAsian" = "Asian",
-    "raceethnicitycombined.factorBlack" = "Black",
-    "raceethnicitycombined.factorHispanic" = "Hispanic",
-    "raceethnicitycombined.factorWhite" = "White",
-    "para_binaryMultiparous" = "Multiparous",
-    "mom_educ.factor≤ Some college" = "≤ Some college",
-    "mom_educ.factor≥ Bachelors" = "≥ Bachelor's degree",
-    "preg_pos.factorNo" = "No SARS-CoV-2 infection during pregnancy",
-    "GAD_days_postpart" = "Days postpartum at GAD-7",
-    "days_since_pandemic" = "Days since pandemic onset",
-    "prepregnancybmi" = "Pre-pregnancy BMI",
-    "depranxYes" = "History of anxiety or depression"
-  )
-  
-  marker_order <- c("IL-1β", "IL-6", "IL-17A", "CRP")
-  
-  variable_order <- c(
-    "Intercept",
-    "IL-1β",
-    "IL-6",
-    "IL-17A",
-    "CRP",
-    "Maternal age",
-    "Asian",
-    "Black",
-    "Hispanic",
-    "White",
-    "Multiparous",
-    "≤ Some college",
-    "≥ Bachelor's degree",
-    "No SARS-CoV-2 infection during pregnancy",
-    "Days postpartum at GAD-7",
-    "Days since pandemic onset",
-    "Pre-pregnancy BMI",
-    "History of anxiety or depression"
-  )
-  
-  results_raw <- bind_rows(
-    lapply(names(marker_map), function(marker) {
-      bind_rows(
-        lapply(names(percentiles), function(tau_chr) {
-          tau_val <- as.numeric(tau_chr)
-          
-          res <- pool_qr_12wk(marker, tau_val, covariates, imp_obj)
-          
-          res %>%
-            mutate(
-              Marker = marker_map[[marker]],
-              Variable = recode(term, !!!pretty_variable_names),
-              Percentile = percentiles[[tau_chr]],
-              `β (95% CI)` = sprintf("%.2f (%.2f, %.2f)", estimate, ci_lo, ci_hi)
-            ) %>%
-            select(Marker, Variable, Percentile, `β (95% CI)`)
-        })
-      )
-    })
-  )
-  
-  results_fmt <- results_raw %>%
-    pivot_wider(
-      names_from = Percentile,
-      values_from = `β (95% CI)`
-    ) %>%
-    mutate(
-      Marker = factor(Marker, levels = marker_order),
-      Variable = factor(Variable, levels = variable_order)
-    ) %>%
-    arrange(Marker, Variable) %>%
-    mutate(
-      Marker = ifelse(duplicated(Marker), "", as.character(Marker))
-    )
-  
-  gt_tbl <- results_fmt %>%
-    gt() %>%
-    cols_label(
-      Marker = "Marker",
-      Variable = "Variable",
-      `50th percentile` = "50th percentile",
-      `75th percentile` = "75th percentile",
-      `90th percentile` = "90th percentile"
-    ) %>%
-    tab_style(
-      style = cell_text(weight = "bold"),
-      locations = cells_body(
-        columns = Marker,
-        rows = Marker != ""
-      )
-    ) %>%
-    cols_align(
-      align = "left",
-      columns = c(Marker, Variable)
-    ) %>%
-    cols_align(
-      align = "center",
-      columns = c(`50th percentile`, `75th percentile`, `90th percentile`)
-    ) %>%
-    tab_options(
-      table.font.size = 11,
-      data_row.padding = px(4),
-      table.border.top.width = px(1),
-      table.border.bottom.width = px(1),
-      heading.border.bottom.width = px(1)
-    )
-  
-  if (!is.null(table_title)) {
-    gt_tbl <- gt_tbl %>%
-      tab_header(title = table_title)
-  }
-  
-  gt_tbl
-}
-
-supp_table_s3 <- make_journal_qr_table_imputed(
-  imp_obj = imp_12wk,
-  table_title = "Supplementary Table S3. Quantile regression results restricted to participants completing the GAD-7 within 12 weeks postpartum"
-)
-
-supp_table_s3
-
-gtsave(
-  supp_table_s3,
-  file.path(output_dir, "Supplementary_Table_S3_Imputed_Quantile_Regression_12_Weeks.docx")
-)
-
-cat("✓ Created Supplementary Table S3 (≤12 Week Analysis)\n")
-
-# ==============================================================================
-# SAVE SESSION INFO
+# 30. SAVE SESSION INFO
 # ==============================================================================
 
 cat("\n--- Saving session information ---\n")
@@ -1828,8 +1294,6 @@ cat("  Tables:\n")
 cat("    - Table_1.docx\n")
 cat("    - Table_2.docx\n")
 cat("    - Supplemental_Table_S1_Full_Multivariable_Quantile_Regression_Results.docx\n")
-cat("    - Supplemental_Table_S2_Complete_Case_Quantile_Regression_Results.docx\n")
-cat("    - Supplementary_Table_S3_Imputed_Quantile_Regression_12_Weeks.docx\n")
 cat("  Other:\n")
 cat("    - R_Session_Info.txt\n")
 cat("════════════════════════════════════════════════════════════════\n")
