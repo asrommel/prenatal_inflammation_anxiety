@@ -149,10 +149,11 @@ data/raw/
 ### Step 3: Update File Paths
 
 Edit lines 20-22 in `data_cleaning_and_analysis.R` to point to your data directory:
-
+```
 # Change to:
 data_dir <- "data/raw"
 mental_health_raw <- read.csv(file.path(data_dir, "Mental health hx 2024-6-6_all variables.csv"))
+```
 
 ### Step 4: Run the Analysis
 
