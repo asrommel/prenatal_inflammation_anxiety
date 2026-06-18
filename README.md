@@ -150,11 +150,6 @@ data/raw/
 
 Edit lines 20-22 in `data_cleaning_and_analysis.R` to point to your data directory:
 
-```r
-# Current (will not work on your machine):
-setwd("/Users/rommea01/Dropbox/Carly/")
-mental_health_raw <- read.csv("/Users/rommea01/Dropbox/Carly/...")
-
 # Change to:
 data_dir <- "data/raw"
 mental_health_raw <- read.csv(file.path(data_dir, "Mental health hx 2024-6-6_all variables.csv"))
